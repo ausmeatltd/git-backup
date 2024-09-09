@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
+	"context"
+	"fmt"
 )
 
 var configFilePath = flag.String("config.file", "git-backup.yml", "The path to your config file.")
@@ -95,4 +97,52 @@ func loadConfig() gitbackup.Config {
 		os.Exit(1)
 	}
 	return config
+}
+
+func uploadBackup() {
+	fmt.Printf("Preparing to upload to Azure Storage\n")
+
+	// TODO: replace <storage-account-name> with your actual storage account name
+	url := "https://ambackupstorage.blob.core.windows.net/"
+	ctx := context.Background()
+
+	credential, err := azidentity.NewDefaultAzureCredential(nil)
+	handleError(err)
+
+	client, err := azblob.NewClient(url, credential, nil)
+	handleError(err)
+
+	err = filepath.Walk(targetPath, func(path string, info os.FileInfo, err error) error {
+        if err != nil {
+            return err
+        }
+
+        if !info.IsDir() {
+            relativePath, err := filepath.Rel(targetPath, path)
+            if err != nil {
+                return err
+            }
+
+            blobClient := containerClient.NewBlockBlobClient(relativePath)
+            file, err := os.Open(path)
+            if err != nil {
+                return err
+            }
+            defer file.Close()
+
+            _, err = blobClient.Upload(context.Background(), file, nil)
+            if err != nil {
+                return err
+            }
+
+            fmt.Printf("Uploaded %s\n", relativePath)
+        }
+        return nil
+    })
+
+    if err != nil {
+        log.Fatalf("Failed to upload folder: %v", err)
+    }
+
+    fmt.Println("Upload complete")
 }
